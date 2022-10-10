@@ -1,0 +1,124 @@
+---
+title: "HAR predictive project"
+author: "Enrico Stanga"
+date: "10/10/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Purpose of the analysis
+
+This analysis consists in the estimation of a ML model to predict the variable "classe" from the Weight Lifting Exercise Dataset.
+
+## Import Libraries
+
+```{r library}
+library(ggplot2)
+library(caret)
+library(kernlab)
+library(randomForest)
+```
+
+## Loading Data
+
+```{r training1}
+setwd("C:\\Users\\e41570\\PycharmProjects\\ML_coursera_project\\input")
+training = read.csv("pml-training.csv")
+testing = read.csv("pml-testing.csv")
+set.seed(41570)
+ncol(training)
+```
+The data presents some inconsistencies, like NAs, blanks and not relevant variables that has to be adjusted.
+
+## PreProcessing
+
+Reduce sparse variables removing columns with >95% of NAs or "":
+```{r training2}
+training[training==""] = NA
+training = training[ , colSums(is.na(training)) < 0.95*nrow(training)]
+ncol(training)
+```
+
+Removing not relevant variables or not helpful for predictions, like windows, names and timestamps:
+```{r training3}
+training = training[, !(colnames(training) %in% 
+                              c("X","user_name","raw_timestamp_part_1",
+                                "raw_timestamp_part_2","cvtd_timestamp",
+                                "new_window","num_window"))]
+ncol(training)
+```
+
+## Data Splitting
+
+The split performed for cross validation is: training set 70% and test set 30%.
+```{r training4}
+inTrain = createDataPartition(training$classe, p=0.7, list=FALSE)
+train_set = training[inTrain,]
+test_set = training[-inTrain,]
+```
+
+## Dimensionality Reduction
+
+Reducing the number of predictors to reduce bias and prevent overfitting through the random forest algorithm.
+```{r training5}
+modFit = randomForest(as.factor(classe) ~ .,data=train_set)
+print(modFit)
+```
+```{r training6}
+imp = varImp(modFit)
+summary(imp)
+```
+After determining the variables importance in terms of variability, I select the ones above the 75% percentile and procede to select the models with this reduced set of variables.
+```{r training7}
+reduced_set = names(train_set[, imp>240.81])
+red_train_set = train_set[,names(train_set) %in% reduced_set]
+red_test_set = test_set[,names(test_set) %in% reduced_set]
+ncol(red_train_set)
+```
+
+## Model Selection
+
+With the reduced set of the 14 most important variables I estimate 2 models: with a Random Forest and a Gradient Boosting Machine algorithms
+```{r training8}
+modFit_rf = train(classe ~., method="rf", data=red_train_set)
+modFit_gbm = train(classe ~., method="gbm", data=red_train_set, verbose=FALSE)
+```
+
+## Prediction
+
+```{r training9}
+pred_rf = predict(modFit_rf, red_test_set)
+pred_gbm = predict(modFit_gbm, red_test_set)
+qplot(pred_rf, pred_gbm, colour=classe, data=red_test_set)
+```
+
+
+Then I fit a model based on the combination of the predictors fitted with a random forest algorithm:
+```{r training10}
+preDF = data.frame(pred_rf, pred_gbm, classe=red_test_set$classe)
+combModFit = train(classe ~., method="rf", data=preDF)
+combPred = predict(combModFit, preDF)
+```
+
+## Confusion Matrices
+
+```{r training11}
+c1 = confusionMatrix(pred_rf, as.factor(red_test_set$classe))
+c2 = confusionMatrix(pred_gbm, as.factor(red_test_set$classe))
+c3 = confusionMatrix(combPred, as.factor(red_test_set$classe))
+
+c1$table; c1$overall
+c2$table; c2$overall
+c3$table; c3$overall
+```
+The most parsimonious model with the best accuracy is the first model estimated (Random Forest): 0.9821.
+
+## Predicting on the test sample
+
+```{r training12}
+predict(modFit_rf,testing)
+```
+
